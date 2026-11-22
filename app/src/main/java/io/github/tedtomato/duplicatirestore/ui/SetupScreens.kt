@@ -74,13 +74,11 @@ fun SetupScreen(vm: MainViewModel) {
     var prefix by rememberSaveable { mutableStateOf(existing?.prefix ?: "duplicati") }
     var password by remember { mutableStateOf(Session.secrets?.password ?: "") }
     var passphrase by remember { mutableStateOf(Session.secrets?.passphrase ?: "") }
-    var pin by remember { mutableStateOf("") }
-    var pin2 by remember { mutableStateOf("") }
+    val auth = LocalDeviceAuth.current
 
     val acc = Account(url.trim(), user.trim(), prefix.trim().ifEmpty { "duplicati" })
     val sec = Secrets(password, passphrase)
     val filled = url.startsWith("https://") && url.length > 8 && user.isNotBlank() && password.isNotEmpty() && passphrase.isNotEmpty()
-    val pinOk = MainViewModel.validPin(pin) && pin == pin2
 
     Scaffold(
         topBar = {
@@ -124,16 +122,24 @@ fun SetupScreen(vm: MainViewModel) {
                 }
             }
 
-            Text("Unlock PIN", style = MaterialTheme.typography.titleMedium)
+            if (vm.legacyNotice) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+                    Text(
+                        "This version unlocks with your fingerprint, face or screen lock instead of an app PIN. " +
+                            "Please enter the password and passphrase once more.",
+                        Modifier.padding(12.dp),
+                    )
+                }
+            }
             Text(
-                "The password and passphrase are stored encrypted on this device and unlocked with a 4-digit PIN. " +
-                    "After 5 wrong PINs they are erased and must be entered again.",
+                if (vm.deviceIsSecure) "The password and passphrase are saved encrypted on this device. You unlock them " +
+                    "with your fingerprint, face or screen lock."
+                else "This device has no screen lock, so the password and passphrase can't be saved securely. " +
+                    "You will enter them each time the app starts. Set a screen lock to save them.",
                 style = MaterialTheme.typography.bodySmall,
             )
-            SecretField("4-digit PIN", pin, { if (it.length <= 4 && it.all(Char::isDigit)) pin = it }, digits = true)
-            SecretField("Repeat PIN", pin2, { if (it.length <= 4 && it.all(Char::isDigit)) pin2 = it }, digits = true)
 
-            Button(onClick = { vm.saveAccount(acc, sec, pin) }, enabled = filled && pinOk && vm.busy == null, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = { vm.saveAccount(acc, sec, auth) }, enabled = filled && vm.busy == null, modifier = Modifier.fillMaxWidth()) {
                 Text("Save")
             }
 
@@ -152,48 +158,30 @@ fun SetupScreen(vm: MainViewModel) {
 
 @Composable
 fun UnlockScreen(vm: MainViewModel) {
-    var pin by remember { mutableStateOf("") }
-    var message by remember { mutableStateOf<String?>(null) }
+    val auth = LocalDeviceAuth.current
     var confirmForget by remember { mutableStateOf(false) }
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    // Ask straight away when the screen opens.
+    LaunchedEffect(Unit) { vm.unlock(auth) }
 
     Scaffold(bottomBar = { vm.busy?.let { BusyBar(it) } }) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().imePadding().padding(24.dp),
+            Modifier.padding(pad).fillMaxSize().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         ) {
             Icon(Icons.Default.Lock, null, tint = MaterialTheme.colorScheme.primary)
-            Text("Enter your PIN", style = MaterialTheme.typography.headlineSmall)
+            Text("Locked", style = MaterialTheme.typography.headlineSmall)
             vm.account?.let { Text(it.url, style = MaterialTheme.typography.bodySmall) }
-            OutlinedTextField(
-                value = pin,
-                onValueChange = {
-                    if (it.length <= 4 && it.all(Char::isDigit)) {
-                        pin = it
-                        if (it.length == 4) {
-                            vm.unlock(it) { msg -> message = msg; pin = "" }
-                        }
-                    }
-                },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                modifier = Modifier.widthIn(max = 200.dp).focusRequester(focus),
-                enabled = vm.busy == null,
-            )
-            message?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row {
-                TextButton(onClick = { confirmForget = true }) { Text("Forgot PIN") }
-            }
+            vm.unlockMessage?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            Button(onClick = { vm.unlock(auth) }, enabled = vm.busy == null) { Text("Unlock") }
+            TextButton(onClick = { confirmForget = true }) { Text("Forget saved secrets") }
         }
     }
     if (confirmForget) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { confirmForget = false },
             title = { Text("Forget saved secrets?") },
-            text = { Text("The saved password and passphrase are erased. You then enter them again and choose a new PIN. The index and settings are kept.") },
+            text = { Text("The saved password and passphrase are erased. You then enter them again. The index and settings are kept.") },
             confirmButton = { TextButton(onClick = { confirmForget = false; vm.forgetSecrets() }) { Text("Erase") } },
             dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )

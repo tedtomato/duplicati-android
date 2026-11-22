@@ -8,8 +8,8 @@ plugins {
 }
 
 // Bump for every package that is handed to the user. Never reuse a delivered version.
-val appVersionCode = 2
-val appVersionName = "0.2"
+val appVersionCode = 3
+val appVersionName = "0.3"
 
 android {
     namespace = "io.github.tedtomato.duplicatirestore"
@@ -96,6 +96,8 @@ dependencies {
     ksp(libs.androidx.room.compiler)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.documentfile)
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.fragment.ktx)
     implementation(libs.okhttp)
     implementation(libs.gson)
     testImplementation(libs.junit)

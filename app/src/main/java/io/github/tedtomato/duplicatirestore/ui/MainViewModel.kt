@@ -17,10 +17,9 @@ import androidx.work.workDataOf
 import io.github.tedtomato.duplicatirestore.App
 import io.github.tedtomato.duplicatirestore.data.Account
 import io.github.tedtomato.duplicatirestore.data.AppLog
-import io.github.tedtomato.duplicatirestore.data.SecretStore
+import io.github.tedtomato.duplicatirestore.data.SecretsLostException
 import io.github.tedtomato.duplicatirestore.data.Secrets
 import io.github.tedtomato.duplicatirestore.data.Session
-import io.github.tedtomato.duplicatirestore.data.WrongPinException
 import io.github.tedtomato.duplicatirestore.index.FileEntry
 import io.github.tedtomato.duplicatirestore.index.FolderEntry
 import io.github.tedtomato.duplicatirestore.index.RestoreItem
@@ -102,7 +101,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Account and secrets --------------------------------------------------------------
     val account: Account? get() = app.settings.account
     val hasSavedSecrets get() = app.secretStore.hasSaved
-    val pinAttemptsLeft get() = app.secretStore.attemptsLeft
+    val deviceIsSecure get() = app.secretStore.deviceIsSecure
+
+    /** Shown once after upgrading from the PIN version. */
+    val legacyNotice: Boolean = app.secretStore.takeLegacyNotice()
 
     var testResult by mutableStateOf<TestResult?>(null)
         private set
@@ -114,9 +116,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun saveAccount(a: Account, s: Secrets, pin: String) {
+    /**
+     * Saves the account. The secrets are stored encrypted behind the device unlock when the
+     * device has a screen lock; otherwise they are kept for this session only.
+     */
+    fun saveAccount(a: Account, s: Secrets, auth: DeviceAuth) {
         launchBusy("Saving…") {
-            withContext(Dispatchers.Default) { app.secretStore.save(s, pin) }
+            if (app.secretStore.deviceIsSecure) {
+                try {
+                    auth.withCipher(
+                        "Save password and passphrase",
+                        "Confirm with your fingerprint, face or screen lock",
+                        app.secretStore::encryptCipher,
+                    ) { app.secretStore.save(it, s) }
+                } catch (e: AuthCancelledException) {
+                    error = "Not saved: ${e.message}"
+                    return@launchBusy
+                }
+            } else {
+                app.secretStore.clear()
+            }
             if (app.settings.indexedFingerprint != a.fingerprint) {
                 withContext(Dispatchers.IO) { dao.clearAll() }
                 app.settings.indexedFingerprint = a.fingerprint
@@ -129,18 +148,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun unlock(pin: String, onWrong: (String) -> Unit) {
+    var unlockMessage by mutableStateOf<String?>(null)
+
+    fun unlock(auth: DeviceAuth) {
+        unlockMessage = null
         launchBusy("Unlocking…") {
             try {
-                Session.secrets = withContext(Dispatchers.Default) { app.secretStore.unlock(pin) }
+                Session.secrets = auth.withCipher(
+                    "Unlock Duplicati Restore",
+                    "Use your fingerprint, face or screen lock",
+                    app.secretStore::decryptCipher,
+                ) { app.secretStore.load(it) }
                 resetTo(Screen.Versions)
-            } catch (e: WrongPinException) {
-                onWrong(e.message!!)
-                if (!app.secretStore.hasSaved) resetTo(Screen.Setup)
-            } catch (e: Exception) {
-                AppLog.e("Unlock failed", e)
-                if (!app.secretStore.hasSaved) resetTo(Screen.Setup)
-                throw e
+            } catch (e: AuthCancelledException) {
+                unlockMessage = e.message
+            } catch (e: SecretsLostException) {
+                error = e.message
+                resetTo(Screen.Setup)
             }
         }
     }
@@ -154,14 +178,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun lock() {
         Session.secrets = null
         resetTo(if (app.secretStore.hasSaved) Screen.Unlock else Screen.Setup)
-    }
-
-    fun changePin(newPin: String) {
-        val s = Session.secrets ?: return
-        launchBusy("Saving…") {
-            withContext(Dispatchers.Default) { app.secretStore.save(s, newPin) }
-            info = "PIN changed"
-        }
     }
 
     // ---- Versions -------------------------------------------------------------------------
@@ -365,6 +381,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         const val SEARCH_LIMIT = 500
-        fun validPin(p: String) = SecretStore.isValidPin(p)
     }
 }

@@ -52,7 +52,7 @@ fun SettingsScreen(vm: MainViewModel) {
     var autoUpdate by remember { mutableStateOf(s.autoUpdateCheck) }
     var partial by remember { mutableStateOf(s.partialDownloads) }
     var showLog by remember { mutableStateOf(false) }
-    var changePin by remember { mutableStateOf(false) }
+    var confirmForget by remember { mutableStateOf(false) }
     val update by vm.updateState.collectAsState()
 
     Scaffold(
@@ -69,7 +69,7 @@ fun SettingsScreen(vm: MainViewModel) {
             vm.account?.let { Text("${it.username} @ ${it.url}", style = MaterialTheme.typography.bodySmall) }
             Row {
                 OutlinedButton(onClick = { vm.push(Screen.Setup) }) { Text("Edit account") }
-                TextButton(onClick = { changePin = true }) { Text("Change PIN") }
+                TextButton(onClick = { confirmForget = true }) { Text("Forget saved secrets") }
                 TextButton(onClick = { vm.lock() }) { Text("Lock") }
             }
 
@@ -151,29 +151,13 @@ fun SettingsScreen(vm: MainViewModel) {
             },
         )
     }
-    if (changePin) {
-        var p1 by remember { mutableStateOf("") }
-        var p2 by remember { mutableStateOf("") }
+    if (confirmForget) {
         AlertDialog(
-            onDismissRequest = { changePin = false },
-            title = { Text("New PIN") },
-            text = {
-                Column {
-                    listOf(p1 to { v: String -> p1 = v }, p2 to { v: String -> p2 = v }).forEachIndexed { i, (value, set) ->
-                        OutlinedTextField(
-                            value, { if (it.length <= 4 && it.all(Char::isDigit)) set(it) },
-                            label = { Text(if (i == 0) "4-digit PIN" else "Repeat PIN") }, singleLine = true,
-                            visualTransformation = PasswordVisualTransformation(),
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(enabled = MainViewModel.validPin(p1) && p1 == p2, onClick = { changePin = false; vm.changePin(p1) }) { Text("Save") }
-            },
-            dismissButton = { TextButton(onClick = { changePin = false }) { Text("Cancel") } },
+            onDismissRequest = { confirmForget = false },
+            title = { Text("Forget saved secrets?") },
+            text = { Text("The saved password and passphrase are erased from this device. You enter them again next time.") },
+            confirmButton = { TextButton(onClick = { confirmForget = false; vm.forgetSecrets() }) { Text("Erase") } },
+            dismissButton = { TextButton(onClick = { confirmForget = false }) { Text("Cancel") } },
         )
     }
 }

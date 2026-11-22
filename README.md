@@ -22,8 +22,10 @@ The app is **restore-only**. It never writes to, renames or deletes anything on 
 - Restores keep running in the background, with a progress notification.
 - Downloaded volumes are cached, still encrypted, so later restores can reuse them. You set the
   cache limit.
-- Your WebDAV password and backup passphrase are stored encrypted on the device and unlocked with a
-  4-digit PIN.
+- Your WebDAV password and backup passphrase are stored encrypted on the device and unlocked with
+  your fingerprint, face or screen lock.
+- Quick restore: when the server supports partial downloads (HTTP Range), only the needed parts of
+  each volume are downloaded, so restoring a small file doesn't cost a whole volume.
 - Light and dark themes. Works on phones and tablets.
 - The app updates itself from this repository's GitHub releases.
 
@@ -47,13 +49,14 @@ under Settings › Updates.
 
 ## Using the app
 
-1. **Set up:** enter your details and choose a 4-digit PIN.
+1. **Set up:** enter your details, then confirm with your fingerprint, face or screen lock.
    - The WebDAV URL of the folder that holds the backup files. This is the same folder Duplicati
      writes to, e.g. `https://example.com/backups/my-pc/`.
    - Your username, password and backup passphrase.
    - The file prefix (default `duplicati`).
 
-   Tap **Test connection** to check that the app can list the folder and decrypt the backup.
+   Tap **Test connection** to check that the app can list the folder and decrypt the backup. It
+   also tells you whether quick restore is available on your server.
 2. **Versions:** the app reads the backup's index and lists the versions. The first sync downloads
    all index files, which takes a moment. Later syncs only fetch new ones.
 3. **Browse:** open a version, then navigate the folders or search. Tick the files and folders you
@@ -68,18 +71,20 @@ If something goes wrong, Settings › Diagnostics › Show log has the details a
 - **Use a read-only account.** If your WebDAV server supports it, create a read-only account limited
   to the backup folder and use that in the app.
 - **Restored files are not encrypted** once they are on the device.
-- **Saved secrets** are encrypted twice. Five wrong PINs in a row erase them, and you enter them
-  again. A 4-digit PIN protects against casual access, not against someone with full control of a
-  rooted phone.
-  - Inner layer: AES-GCM with a key derived from your PIN (PBKDF2-HMAC-SHA256).
-  - Outer layer: AES-GCM with a non-exportable Android Keystore key.
+- **Saved secrets** are encrypted with a key kept in Android's Keystore (in the phone's secure
+  hardware where available). The key can't be exported and only works right after you unlock with
+  your fingerprint, face or screen lock. Android limits wrong attempts. On a device without a screen
+  lock, nothing is saved and you enter the password and passphrase each time.
+- **Quick restore** reads volumes partially, so the checksum of the whole volume can't be checked for
+  those. Every block and every restored file is still checked against the backup. You can turn quick
+  restore off in Settings.
 - The app opts out of Android cloud backup and device-to-device transfer, so its data stays on the
   device.
 
 ## Limitations
 
-- Whole data volumes are downloaded (Duplicati's default is 50 MB each), even to restore a small
-  file. Partial downloads are planned.
+- If the server doesn't support partial downloads, whole data volumes are downloaded (Duplicati's
+  default is 50 MB each), even to restore a small file.
 - An interrupted restore starts again from the beginning.
 - WebDAV is the only storage type supported for now.
 
