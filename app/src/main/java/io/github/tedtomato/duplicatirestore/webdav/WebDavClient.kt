@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit
 
 class WebDavException(message: String, val code: Int = 0) : IOException(message)
 
+class RangeNotSupportedException : IOException("The server does not support partial downloads (HTTP Range)")
+
 data class RemoteFile(val name: String, val size: Long)
 
 /**
@@ -134,6 +136,28 @@ class WebDavClient(baseUrl: String, username: String, password: String) {
         client.newCall(b.build()).execute().use { resp ->
             check(resp, "download $name")
             return resp.code to resp.body!!.bytes()
+        }
+    }
+
+    /**
+     * Downloads exactly [length] bytes at [offset] with an HTTP Range request. Throws
+     * [RangeNotSupportedException] if the server answers with the whole file instead of 206.
+     */
+    fun readRange(name: String, offset: Long, length: Int): ByteArray {
+        if (length == 0) return ByteArray(0)
+        val req = Request.Builder().url(fileUrl(name)).header("Authorization", auth)
+            .header("Range", "bytes=$offset-${offset + length - 1}")
+            .header("Accept-Encoding", "identity")
+            .get().build()
+        client.newCall(req).execute().use { resp ->
+            if (resp.code == 200) throw RangeNotSupportedException()
+            check(resp, "download part of $name")
+            if (resp.code != 206) throw WebDavException("Unexpected HTTP ${resp.code} for a range request")
+            val cr = resp.header("Content-Range")
+            if (cr != null && !cr.startsWith("bytes $offset-")) throw WebDavException("Server returned the wrong range: $cr")
+            val bytes = resp.body!!.bytes()
+            if (bytes.size != length) throw WebDavException("Range request returned ${bytes.size} bytes instead of $length")
+            return bytes
         }
     }
 

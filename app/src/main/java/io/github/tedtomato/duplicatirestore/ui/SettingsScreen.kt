@@ -50,6 +50,7 @@ fun SettingsScreen(vm: MainViewModel) {
     val s = vm.app.settings
     var cacheText by remember { mutableStateOf(s.cacheLimitMb.toString()) }
     var autoUpdate by remember { mutableStateOf(s.autoUpdateCheck) }
+    var partial by remember { mutableStateOf(s.partialDownloads) }
     var showLog by remember { mutableStateOf(false) }
     var changePin by remember { mutableStateOf(false) }
     val update by vm.updateState.collectAsState()
@@ -87,6 +88,20 @@ fun SettingsScreen(vm: MainViewModel) {
             Row {
                 OutlinedButton(onClick = { vm.clearCache() }) { Text("Clear cache") }
                 TextButton(onClick = { vm.clearIndex() }) { Text("Rebuild index") }
+            }
+
+            HorizontalDivider()
+            Section("Downloads")
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Quick restore")
+                    Text(
+                        "Download only the needed parts of each volume, when the server allows it. Every block and " +
+                            "file is still checked; the whole-volume checksum is skipped for volumes read this way.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Switch(partial, { partial = it; s.partialDownloads = it })
             }
 
             HorizontalDivider()

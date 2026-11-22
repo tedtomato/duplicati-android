@@ -93,9 +93,17 @@ private fun PlanView(vm: MainViewModel) {
         Card {
             Column(Modifier.padding(16.dp)) {
                 Text("${plan.files.size} files, ${formatBytes(plan.totalBytes)}", style = MaterialTheme.typography.titleMedium)
-                Text("Needs ${plan.volumes.size} volumes (${formatBytes(plan.downloadBytes)} to download)")
-                if (plan.volumes.size > 0 && plan.downloadBytes < plan.volumes.values.sum()) {
-                    Text("Some volumes are already in the cache.", style = MaterialTheme.typography.bodySmall)
+                Text("Needs ${plan.volumes.size} volumes (about ${formatBytes(plan.downloadBytes)} to download)")
+                if (plan.partialVolumes > 0) {
+                    Text(
+                        "Quick restore: ${plan.partialVolumes} of ${plan.volumes.size} volumes are read partially. For those, " +
+                            "the whole-volume checksum can't be checked, but every block and every file still is.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                val cached = plan.volumes.keys.count { vm.app.volumeCache.has(it) }
+                if (cached > 0) {
+                    Text("$cached volumes are already in the cache.", style = MaterialTheme.typography.bodySmall)
                 }
                 if (plan.missingBlocklists > 0) {
                     Text("${plan.missingBlocklists} blocklists are read from data volumes first.", style = MaterialTheme.typography.bodySmall)

@@ -115,6 +115,11 @@ fun SetupScreen(vm: MainViewModel) {
                         Text("Connection OK", style = MaterialTheme.typography.titleSmall)
                         Text("${r.versions} versions, ${r.dblocks} data volumes, ${r.dindexes} index volumes")
                         r.newest?.let { Text("Newest file list decrypted (AES Crypt v${r.aesVersion}, block size ${r.blocksize?.let { b -> formatBytes(b.toLong()) }})") }
+                        when (r.rangeSupported) {
+                            true -> Text("Quick restore available (the server supports partial downloads)")
+                            false -> Text("The server doesn't support partial downloads; whole volumes will be downloaded")
+                            null -> Unit
+                        }
                     }
                 }
             }

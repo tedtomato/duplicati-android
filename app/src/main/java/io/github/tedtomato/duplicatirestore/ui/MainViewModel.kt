@@ -295,7 +295,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 selectedFiles.forEach { chosen[it.id] = it }
                 for (d in selectedFolders) dao.filesUnder(version, d.normPath + "/").forEach { chosen[it.id] = it }
                 val v = dao.version(version) ?: throw IllegalStateException("Version not in the index")
-                val engine = RestoreEngine(dao, app.repository.client(a, s), app.volumeCache, s.passphrase)
+                val engine = RestoreEngine(dao, app.repository.client(a, s), app.volumeCache, s.passphrase,
+                    partialEnabled = app.settings.partialDownloads)
                 engine.plan(chosen.values.toList(), v.blocksize ?: throw IllegalStateException("Version not loaded"))
             }
             plan = p

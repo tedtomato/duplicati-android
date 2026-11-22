@@ -41,6 +41,11 @@ class Settings(context: Context) {
         get() = p.getString("destTree", null)
         set(v) = p.edit { putString("destTree", v) }
 
+    /** Read only the needed parts of volumes when the server supports HTTP Range. */
+    var partialDownloads: Boolean
+        get() = p.getBoolean("partialDownloads", true)
+        set(v) = p.edit { putBoolean("partialDownloads", v) }
+
     var autoUpdateCheck: Boolean
         get() = p.getBoolean("autoUpdateCheck", true)
         set(v) = p.edit { putBoolean("autoUpdateCheck", v) }

@@ -45,7 +45,8 @@ class RestoreWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             val blocksize = version.blocksize ?: throw IllegalStateException("Version not loaded")
             val files = items.map { it.fileId }.chunked(500).flatMap { dao.filesById(it) }
             val itemByFile = items.associateBy { it.fileId }
-            val engine = RestoreEngine(dao, app.repository.client(account, secrets), app.volumeCache, secrets.passphrase)
+            val engine = RestoreEngine(dao, app.repository.client(account, secrets), app.volumeCache, secrets.passphrase,
+                partialEnabled = app.settings.partialDownloads)
             AppLog.i("Restore $jobId: ${files.size} files from $versionName")
 
             var lastNotify = 0L
@@ -84,7 +85,7 @@ class RestoreWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     o.built.delete()
                 }
             }
-            AppLog.i("Restore $jobId finished: $ok of ${outcomes.size} OK")
+            AppLog.i("Restore $jobId finished: $ok of ${outcomes.size} OK (${engine.partialReads} volumes read partially)")
             notifyDone("$ok of ${outcomes.size} files restored and checked")
             return Result.success()
         } catch (e: Throwable) {

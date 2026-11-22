@@ -2,11 +2,16 @@ package io.github.tedtomato.duplicatirestore.restore
 
 import io.github.tedtomato.duplicatirestore.cache.VolumeCache
 import io.github.tedtomato.duplicatirestore.crypto.AesCrypt
+import io.github.tedtomato.duplicatirestore.crypto.AesRangeReader
+import io.github.tedtomato.duplicatirestore.crypto.RangeSource
+import io.github.tedtomato.duplicatirestore.crypto.WrongPassphraseException
 import io.github.tedtomato.duplicatirestore.data.AppLog
 import io.github.tedtomato.duplicatirestore.format.B64
+import io.github.tedtomato.duplicatirestore.format.RemoteZip
 import io.github.tedtomato.duplicatirestore.index.BlocklistEntity
 import io.github.tedtomato.duplicatirestore.index.FileEntry
 import io.github.tedtomato.duplicatirestore.index.IndexDao
+import io.github.tedtomato.duplicatirestore.webdav.RangeNotSupportedException
 import io.github.tedtomato.duplicatirestore.webdav.WebDavClient
 import java.io.File
 import java.io.RandomAccessFile
@@ -20,8 +25,10 @@ data class RestorePlan(
     val totalBytes: Long,
     /** dblock name -> size, for the volumes that will be read. */
     val volumes: Map<String, Long>,
-    /** Bytes still to download (volumes not in the cache). */
+    /** Estimated bytes to download (whole volumes not in the cache, plus partial reads). */
     val downloadBytes: Long,
+    /** Volumes that will be read partially ("quick restore"). */
+    val partialVolumes: Int,
     /** Blocklists that are not in any dindex and will be read from dblocks first. */
     val missingBlocklists: Int,
     /** Files that cannot be restored, with the reason. */
@@ -31,17 +38,23 @@ data class RestorePlan(
 private class Target(val file: Int, val index: Int)
 
 /**
- * Restores files by downloading whole dblock volumes.
+ * Restores files from dblock volumes.
  *
- * Checks, in order: every block's SHA-256 equals its name; every downloaded volume's SHA-256 equals
- * the `volumehash` from the dindex; every rebuilt file's size and SHA-256 equal the dlist entry.
- * Files are built in the cache and only handed to [deliver] once they pass.
+ * Each volume is either downloaded whole (and kept in the cache) or, when only a small part of it
+ * is needed and the server supports HTTP Range, read partially: just the AES header, the zip's
+ * central directory and the needed entries ("quick restore").
+ *
+ * Checks: every block's SHA-256 equals its name; every rebuilt file's size and SHA-256 equal the
+ * dlist entry. For whole volumes, also the volume's SHA-256 (`volumehash` from the dindex) and the
+ * AES Crypt HMAC. A partial read can't check those two, but the block and file checks still apply.
+ * Files are built in the cache and only handed out once they pass.
  */
 class RestoreEngine(
     private val dao: IndexDao,
     private val client: WebDavClient,
     private val cache: VolumeCache,
     private val passphrase: String,
+    private val partialEnabled: Boolean = true,
 ) {
     // ---- Planning -------------------------------------------------------------------------
 
@@ -76,14 +89,18 @@ class RestoreEngine(
         return s
     }
 
+    /** Whether to read [blockCount] blocks of [vol] partially rather than download it whole. */
+    private fun usePartial(vol: String, volSize: Long, blockCount: Int, blocksize: Int): Boolean =
+        partialEnabled && rangeSupported != false && !cache.has(vol) && volSize > 0 &&
+            blockCount.toLong() * blocksize < volSize * PARTIAL_MAX_FRACTION
+
     suspend fun plan(files: List<FileEntry>, blocksize: Int): RestorePlan {
         val problems = HashMap<Long, String>()
         val missingLists = missingBlocklists(files)
         val needed = HashSet<String>()
         needed += missingLists
         for (f in files) {
-            val hashes = blockHashes(f)
-            if (hashes == null) continue // counted via missingLists; resolved during the restore
+            val hashes = blockHashes(f) ?: continue // resolved during the restore
             val expected = ((f.size + blocksize - 1) / blocksize).toInt()
             if (hashes.size != expected) {
                 problems[f.id] = "Has ${hashes.size} blocks, expected $expected"
@@ -97,20 +114,28 @@ class RestoreEngine(
             val hashes = blockHashes(f) ?: continue
             if (hashes.any { locs[it].isNullOrEmpty() }) problems[f.id] = "A block is not in any index file (try Sync)"
         }
-        if (missingLists.any { locs[it].isNullOrEmpty() }) {
-            for (f in files) if (f.blocklists?.split(',')?.any { it in missingLists && locs[it].isNullOrEmpty() } == true) {
-                problems[f.id] = "A blocklist is not in any index file (try Sync)"
-            }
+        for (f in files) if (f.blocklists?.split(',')?.any { it in missingLists && locs[it].isNullOrEmpty() } == true) {
+            problems[f.id] = "A blocklist is not in any index file (try Sync)"
         }
         val assignment = assign(locs)
-        val volNames = assignment.values.toSet()
-        val volumes = volNames.associateWith { dao.volume(it)?.size ?: -1L }
-        val download = volumes.filterKeys { !cache.has(it) }.values.sumOf { maxOf(it, 0) }
+        val blocksPerVol = assignment.values.groupingBy { it }.eachCount()
+        val volumes = blocksPerVol.keys.associateWith { dao.volume(it)?.size ?: -1L }
+        var download = 0L
+        var partial = 0
+        for ((vol, n) in blocksPerVol) {
+            val size = volumes.getValue(vol)
+            when {
+                cache.has(vol) -> Unit
+                usePartial(vol, size, n, blocksize) -> { partial++; download += n.toLong() * blocksize + PARTIAL_OVERHEAD }
+                else -> download += maxOf(size, 0)
+            }
+        }
         return RestorePlan(
             files = files,
             totalBytes = files.sumOf { it.size },
             volumes = volumes,
             downloadBytes = download,
+            partialVolumes = partial,
             missingBlocklists = missingLists.size,
             problems = problems,
         )
@@ -118,7 +143,7 @@ class RestoreEngine(
 
     /**
      * Chooses one dblock per block: prefer volumes already cached, then volumes that hold many
-     * of the needed blocks, so fewer volumes are downloaded.
+     * of the needed blocks, so fewer volumes are read.
      */
     private fun assign(locs: Map<String, List<String>>): Map<String, String> {
         val counts = HashMap<String, Int>()
@@ -136,6 +161,10 @@ class RestoreEngine(
 
     class FileOutcome(val file: FileEntry, val ok: Boolean, val message: String?, val built: File?)
 
+    /** Volumes read partially during [run]. */
+    var partialReads = 0
+        private set
+
     /**
      * Runs the restore. Built files are left in [buildDir] for [FileOutcome]s with ok = true; the
      * caller copies them out and deletes them.
@@ -148,17 +177,13 @@ class RestoreEngine(
         val missing = missingBlocklists(files)
         if (missing.isNotEmpty()) {
             AppLog.i("Reading ${missing.size} blocklists from dblocks")
-            val locs = locate(missing)
-            val byVol = assign(locs).entries.groupBy({ it.value }, { it.key })
+            val byVol = assign(locate(missing)).entries.groupBy({ it.value }, { it.key })
             for ((vol, hashes) in byVol) {
-                withVolume(vol, listener, 0, 1) { zip, names ->
-                    val rows = hashes.mapNotNull { h ->
-                        val e = names[h] ?: return@mapNotNull null
-                        val data = zip.getInputStream(e).use { it.readBytes() }
-                        if (B64.sha256(data) != h) null else BlocklistEntity(h, data)
-                    }
-                    dao.insertBlocklists(rows)
+                val rows = ArrayList<BlocklistEntity>()
+                readBlocks(vol, hashes.toSet(), blocksize, listener, 0, 1) { h, data ->
+                    if (B64.sha256(data) == h) rows += BlocklistEntity(h, data)
                 }
+                dao.insertBlocklists(rows)
             }
         }
 
@@ -185,31 +210,32 @@ class RestoreEngine(
             if (i !in failed) RandomAccessFile(parts[i], "rw").use { it.setLength(f.size) }
         }
 
-        // 4. Each volume once: verify, decrypt, place blocks.
+        // 4. Each volume once: read the needed blocks, check them, place them.
         val ordered = byVol.keys.sortedByDescending { cache.has(it) }
         ordered.forEachIndexed { vi, vol ->
-            val hashes = byVol.getValue(vol).filter { h -> targets.getValue(h).any { it.file !in failed } }
+            val hashes = byVol.getValue(vol).filter { h -> targets.getValue(h).any { it.file !in failed } }.toSet()
             if (hashes.isEmpty()) return@forEachIndexed
-            val ok = runCatching {
-                withVolume(vol, listener, vi, ordered.size) { zip, names ->
-                    for (h in hashes) {
-                        val ts = targets.getValue(h)
-                        val e = names[h]
-                        if (e == null) { ts.forEach { failed[it.file] = "Block missing from $vol" }; continue }
-                        val data = zip.getInputStream(e).use { it.readBytes() }
-                        if (B64.sha256(data) != h) { ts.forEach { failed[it.file] = "Block hash mismatch in $vol" }; continue }
-                        for (t in ts) {
-                            if (t.file in failed) continue
-                            val f = files[t.file]
-                            val offset = t.index.toLong() * blocksize
-                            val expectedLen = minOf(blocksize.toLong(), f.size - offset)
-                            if (data.size.toLong() != expectedLen) { failed[t.file] = "Block ${t.index} has the wrong size"; continue }
-                            RandomAccessFile(parts[t.file], "rw").use { raf -> raf.seek(offset); raf.write(data) }
-                        }
+            val result = runCatching {
+                readBlocks(vol, hashes, blocksize, listener, vi, ordered.size) { h, data ->
+                    val ts = targets.getValue(h)
+                    if (B64.sha256(data) != h) {
+                        ts.forEach { failed[it.file] = "Block hash mismatch in $vol" }
+                        return@readBlocks
+                    }
+                    for (t in ts) {
+                        if (t.file in failed) continue
+                        val f = files[t.file]
+                        val offset = t.index.toLong() * blocksize
+                        val expectedLen = minOf(blocksize.toLong(), f.size - offset)
+                        if (data.size.toLong() != expectedLen) { failed[t.file] = "Block ${t.index} has the wrong size"; continue }
+                        RandomAccessFile(parts[t.file], "rw").use { raf -> raf.seek(offset); raf.write(data) }
                     }
                 }
             }
-            ok.exceptionOrNull()?.let { err ->
+            result.onSuccess { notFound ->
+                notFound.forEach { h -> targets.getValue(h).forEach { failed[it.file] = "Block missing from $vol" } }
+            }
+            result.exceptionOrNull()?.let { err ->
                 if (err is InterruptedException) throw err
                 AppLog.e("Volume $vol failed", err)
                 hashes.forEach { h -> targets.getValue(h).forEach { failed[it.file] = err.message ?: err.javaClass.simpleName } }
@@ -238,16 +264,84 @@ class RestoreEngine(
     }
 
     /**
-     * Gets an encrypted volume (cache or download), checks its SHA-256 against `volumehash`,
-     * decrypts it to the work folder, runs [body] on the zip, then deletes the decrypted copy.
+     * Reads the blocks [hashes] from volume [vol], calling [onBlock] for each one found, and
+     * returns the hashes that were not in the volume. Uses a partial read when worthwhile, and
+     * falls back to downloading the whole volume if that fails.
      */
-    private suspend fun withVolume(
+    private suspend fun readBlocks(
         vol: String,
+        hashes: Set<String>,
+        blocksize: Int,
         listener: Listener,
         index: Int,
         count: Int,
-        body: suspend (ZipFile, Map<String, ZipEntry>) -> Unit,
-    ) {
+        onBlock: (String, ByteArray) -> Unit,
+    ): Set<String> {
+        val info = dao.volume(vol)
+        val size = info?.size ?: -1
+        if (usePartial(vol, size, hashes.size, blocksize)) {
+            try {
+                val r = readPartial(vol, size, hashes, listener, index, count, onBlock)
+                partialReads++
+                return r
+            } catch (e: RangeNotSupportedException) {
+                rangeSupported = false
+                AppLog.i("The server ignores HTTP Range; downloading whole volumes from now on")
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (e: WrongPassphraseException) {
+                throw e
+            } catch (e: Exception) {
+                AppLog.e("Partial read of $vol failed; downloading it whole", e)
+            }
+        }
+        return readWhole(vol, hashes, listener, index, count, onBlock)
+    }
+
+    private fun readPartial(
+        vol: String,
+        size: Long,
+        hashes: Set<String>,
+        listener: Listener,
+        index: Int,
+        count: Int,
+        onBlock: (String, ByteArray) -> Unit,
+    ): Set<String> {
+        var fetched = 0L
+        val label = "Volume ${index + 1} of $count: reading ${hashes.size} blocks"
+        val src = object : RangeSource {
+            override val size = size
+            override fun read(offset: Long, length: Int): ByteArray {
+                if (listener.isCancelled()) throw InterruptedException("Cancelled")
+                val b = client.readRange(vol, offset, length)
+                fetched += b.size
+                listener.progress("$label (${mb(fetched)})", 0, 0)
+                return b
+            }
+        }
+        listener.progress(label, 0, 0)
+        val aes = AesRangeReader(src, passphrase)
+        if (rangeSupported == null) { rangeSupported = true; AppLog.i("The server supports HTTP Range: quick restore is available") }
+        val zip = RemoteZip(aes.plainLength) { o, l -> aes.read(o, l) }
+        val byName = zip.entries.associateBy { B64.plain(it.name) }
+        val wanted = hashes.mapNotNull { byName[it] }
+        zip.extract(wanted) { e, data -> onBlock(B64.plain(e.name), data) }
+        AppLog.i("$vol: read ${wanted.size} blocks partially, ${mb(fetched)} of ${mb(size)} (AES Crypt v${aes.header.version})")
+        return hashes - byName.keys
+    }
+
+    /**
+     * Gets an encrypted volume (cache or download), checks its SHA-256 against `volumehash`,
+     * decrypts it (checking the HMAC), reads the blocks, then deletes the decrypted copy.
+     */
+    private suspend fun readWhole(
+        vol: String,
+        hashes: Set<String>,
+        listener: Listener,
+        index: Int,
+        count: Int,
+        onBlock: (String, ByteArray) -> Unit,
+    ): Set<String> {
         val info = dao.volume(vol)
         val expectedHash = info?.volumeHash
         var enc = cache.get(vol)
@@ -279,7 +373,11 @@ class RestoreEngine(
                 val names = HashMap<String, ZipEntry>()
                 for (e in zip.entries()) if (!e.isDirectory) names[B64.plain(e.name)] = e
                 listener.progress("Volume ${index + 1} of $count: extracting", 0, 1)
-                body(zip, names)
+                for (h2 in hashes) {
+                    val e = names[h2] ?: continue
+                    onBlock(h2, zip.getInputStream(e).use { it.readBytes() })
+                }
+                return hashes - names.keys
             }
         } finally {
             dec.delete()
@@ -288,6 +386,15 @@ class RestoreEngine(
     }
 
     companion object {
+        /** Read partially only when the needed blocks are less than this share of the volume. */
+        const val PARTIAL_MAX_FRACTION = 0.4
+
+        /** Rough extra bytes for a partial read: AES header, zip tail and central directory. */
+        const val PARTIAL_OVERHEAD = 96L * 1024
+
+        /** Whether the server honours HTTP Range; null until the first partial read. */
+        @Volatile var rangeSupported: Boolean? = null
+
         fun sha256File(f: File): String {
             val md = MessageDigest.getInstance("SHA-256")
             f.inputStream().use { s ->

@@ -23,7 +23,10 @@ import androidx.room.withTransaction
 import java.io.File
 import java.util.zip.ZipFile
 
-data class TestResult(val versions: Int, val dblocks: Int, val dindexes: Int, val newest: String?, val aesVersion: Int?, val blocksize: Int?)
+data class TestResult(
+    val versions: Int, val dblocks: Int, val dindexes: Int, val newest: String?,
+    val aesVersion: Int?, val blocksize: Int?, val rangeSupported: Boolean?,
+)
 
 /** Reads the remote backup into the local index. Never writes to the storage. */
 class BackupRepository(
@@ -58,6 +61,7 @@ class BackupRepository(
         val newest = dlists.firstOrNull()
         var aesVersion: Int? = null
         var blocksize: Int? = null
+        var range: Boolean? = null
         if (newest != null) {
             val enc = File(workDir, "test.dlist.aes")
             val zip = File(workDir, "test.dlist.zip")
@@ -73,6 +77,16 @@ class BackupRepository(
             } finally {
                 enc.delete(); zip.delete()
             }
+            // Partial downloads need HTTP Range: ask for the first 16 bytes and expect 206.
+            range = try {
+                c.readRange(newest.name, 0, 16); true
+            } catch (e: io.github.tedtomato.duplicatirestore.webdav.RangeNotSupportedException) {
+                false
+            } catch (e: Exception) {
+                AppLog.e("Range check failed", e); null
+            }
+            range?.let { io.github.tedtomato.duplicatirestore.restore.RestoreEngine.rangeSupported = it }
+            AppLog.i("HTTP Range supported: $range")
         }
         return TestResult(
             versions = dlists.size,
@@ -81,6 +95,7 @@ class BackupRepository(
             newest = newest?.name,
             aesVersion = aesVersion,
             blocksize = blocksize,
+            rangeSupported = range,
         )
     }
 
