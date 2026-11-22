@@ -53,7 +53,7 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
-            echo "::error::Repository secret RELEASE_KEYSTORE_BASE64 is not set; see README (Releases and updates)."
+            echo "::error::Repository secret RELEASE_KEYSTORE_BASE64 is not set. Add the release signing key as repository secrets (RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD)."
             exit 1
           fi
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"

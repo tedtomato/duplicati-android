@@ -1,105 +1,115 @@
-# Duplicati Restore (Android)
+# Duplicati Restore for Android
 
-A sideloaded Android app that restores files from a Duplicati backup on a Hetzner Storage Box over
-WebDAV. It is **restore-only**: it never writes to, renames or deletes anything on the storage.
+An Android app that restores files from a [Duplicati](https://duplicati.com) backup stored on a
+WebDAV server. You browse your backup on the phone, pick the files you need and download them,
+without a computer.
 
-- Set up an account: WebDAV URL, username, password, backup passphrase and file prefix.
-- The password and passphrase are stored on the device, encrypted and unlocked with a 4-digit PIN.
-- Pick a backup version, then browse, search and multi-select its files and folders.
-- Restore them onto the phone. Every block, every downloaded volume and every rebuilt file is checked
-  against the SHA-256 values recorded in the backup. A file is only saved after it passes.
+The app is **restore-only**. It never writes to, renames or deletes anything on the server.
+
+## Features
+
+- Connect to any WebDAV server with a URL, username and password.
+- See every backup version, newest first.
+- Browse a version's folders, search by name, and select files or whole folders.
+- Restore them to a folder of your choice or to Downloads, keeping the original folder layout.
+- Every restored file is checked against the backup's own checksums before it is saved:
+  - each data block,
+  - each downloaded volume,
+  - the whole file (size and SHA-256).
+
+  A file that fails a check is never saved.
+- Before a restore starts, it shows how much will be downloaded, and warns you on mobile data.
+- Restores keep running in the background, with a progress notification.
+- Downloaded volumes are cached, still encrypted, so later restores can reuse them. You set the
+  cache limit.
+- Your WebDAV password and backup passphrase are stored encrypted on the device and unlocked with a
+  4-digit PIN.
+- Light and dark themes. Works on phones and tablets.
 - The app updates itself from this repository's GitHub releases.
 
-Supported: Duplicati backups with zip compression and Duplicati's built-in AES encryption
-(`.zip.aes`), on WebDAV. Other setups (`.7z`, `.gpg`) are rejected with a clear message.
+## Requirements
 
-## Security notes
+- Android 8.0 (API 26) or later.
+- A Duplicati 2 backup that uses:
+  - **zip** compression (the default),
+  - Duplicati's built-in **AES-256 encryption** (files ending in `.zip.aes`),
+  - a WebDAV destination reachable over **HTTPS**.
 
-- **Use a read-only sub-account.** Create a read-only Storage Box sub-account limited to the backup
-  folder. Its host is `uXXXXXX-subN.your-storagebox.de` and its root is the shared folder, so the URL
-  path is shorter than with the main account.
-- **Restored files are unencrypted** on the device.
-- **Saved secrets:** the password and passphrase are encrypted twice. The inner layer is AES-GCM with
-  a key derived from the PIN (PBKDF2-HMAC-SHA256, 200,000 iterations). The outer layer is AES-GCM
-  with a non-exportable Android Keystore key. Five wrong PINs in a row erase them. A 4-digit PIN has
-  only 10,000 values, so this protects against casual access, not against someone who has rooted the
-  phone.
-- The app opts out of Android cloud backup and device transfer.
+  Backups with other setups (`.7z`, `.gpg`, unencrypted) are detected and rejected with a message.
 
-## Building
+## Installing
 
-Open the folder in Android Studio and run the `app` configuration. Debug builds get the package
-suffix `.debug` and install next to the release app, because they are signed with a different key.
+1. On your phone, open the [latest release](../../releases/latest) and download the APK file.
+2. Open it and allow your browser to install apps when Android asks.
 
-The GitHub Actions workflow (`.github/workflows/build.yml`) builds the debug APK and runs the unit
-tests on every push. The debug APK is attached to each run as the `debug-apk` artifact.
+After that, the app offers each new version by itself, either as a banner on the versions screen or
+under Settings › Updates.
 
-## Releases and updates
+## Using the app
 
-The app checks `https://api.github.com/repos/tedtomato/duplicati-android/releases/latest`. It reads
-that release's `update.json` (`versionCode`, `versionName`, `sha256`) and installs its APK with
-Android's PackageInstaller once the user confirms. Android only accepts the update if it is signed
-with the same key as the installed app, so all releases must be signed with one release key.
+1. **Set up:** enter your details and choose a 4-digit PIN.
+   - The WebDAV URL of the folder that holds the backup files. This is the same folder Duplicati
+     writes to, e.g. `https://example.com/backups/my-pc/`.
+   - Your username, password and backup passphrase.
+   - The file prefix (default `duplicati`).
 
-### One-time setup: the release key
+   Tap **Test connection** to check that the app can list the folder and decrypt the backup.
+2. **Versions:** the app reads the backup's index and lists the versions. The first sync downloads
+   all index files, which takes a moment. Later syncs only fetch new ones.
+3. **Browse:** open a version, then navigate the folders or search. Tick the files and folders you
+   want, then tap **Restore**.
+4. **Restore:** check the summary, choose where to save, and start. When it finishes, each file is
+   listed as OK or failed, and you can open the restored files from there.
 
-On the PC (Android Studio's JDK has `keytool`), in PowerShell:
+If something goes wrong, Settings › Diagnostics › Show log has the details and a Copy button.
 
-```powershell
-& "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -genkeypair -v -keystore release.jks -alias release -keyalg RSA -keysize 4096 -validity 36500
+## Security
+
+- **Use a read-only account.** If your WebDAV server supports it, create a read-only account limited
+  to the backup folder and use that in the app.
+- **Restored files are not encrypted** once they are on the device.
+- **Saved secrets** are encrypted twice. Five wrong PINs in a row erase them, and you enter them
+  again. A 4-digit PIN protects against casual access, not against someone with full control of a
+  rooted phone.
+  - Inner layer: AES-GCM with a key derived from your PIN (PBKDF2-HMAC-SHA256).
+  - Outer layer: AES-GCM with a non-exportable Android Keystore key.
+- The app opts out of Android cloud backup and device-to-device transfer, so its data stays on the
+  device.
+
+## Limitations
+
+- Whole data volumes are downloaded (Duplicati's default is 50 MB each), even to restore a small
+  file. Partial downloads are planned.
+- An interrupted restore starts again from the beginning.
+- WebDAV is the only storage type supported for now.
+
+## Building from source
+
+Open the project in Android Studio and run the `app` configuration. Alternatively, build from the
+command line:
+
+```bash
+./gradlew assembleDebug
 ```
 
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("release.jks")) | Set-Clipboard
-```
+Debug builds install next to the release app with the package suffix `.debug`.
 
-On GitHub, go to the repository's Settings › Secrets and variables › Actions and add four secrets:
+The GitHub Actions workflow (`.github/workflows/build.yml`) builds the app and runs the unit tests on
+every push. Each run has the debug APK attached as the `debug-apk` artifact.
 
-| Secret | Value |
-|---|---|
-| `RELEASE_KEYSTORE_BASE64` | the clipboard contents from above |
-| `RELEASE_KEYSTORE_PASSWORD` | the keystore password |
-| `RELEASE_KEY_ALIAS` | `release` |
-| `RELEASE_KEY_PASSWORD` | the key password (the same as the keystore password if you pressed Enter) |
-
-Keep `release.jks` and its password safe. If they are lost, users have to uninstall the app and
-install a release signed with a new key.
-
-### Publishing a version
-
-1. Bump `appVersionCode` and `appVersionName` in `app/build.gradle.kts`. Never reuse a version
-   that has already been delivered.
-2. Commit and push, then either push a tag `v<versionName>` (e.g. `v0.2`) on that commit, or run
-   the Build workflow by hand (Actions › Build › Run workflow) with "Publish a signed release" ticked.
-3. The workflow builds the signed APK and publishes a GitHub release `v<versionName>` containing
-   `DuplicatiRestore-<version>.apk` and `update.json`. It refuses to publish a version that already
-   has a release.
-
-Install the first release by opening its APK on the phone. After that, the app offers each new
-release by itself (Settings › Updates, or a banner on the versions screen).
-
-## Code layout
+### Code layout
 
 `app/src/main/java/io/github/tedtomato/duplicatirestore/`:
 
 | Package | Contents |
 |---|---|
-| `webdav` | Read-only WebDAV client: PROPFIND Depth 1, and GET with an optional Range header |
-| `crypto` | Streaming AES Crypt v2/v3 decryptor |
-| `format` | Remote file names, manifest, `filelist.json` (streaming), dindex, base64 and path helpers |
-| `index` | Room database: versions, files, folders, block locations, volumes, blocklists, restore results |
-| `sync` | Folder listing, dindex import, dlist loading, "Test connection" |
-| `restore` | Planning, whole-volume restore with all checks, foreground WorkManager job, saving files |
-| `cache` | LRU cache of encrypted volumes |
-| `data` | Settings, PIN-protected secret store, in-memory session, diagnostics log |
-| `update` | GitHub-release self-update |
-| `ui` | Compose screens: setup, PIN unlock, versions, browser, restore, settings |
-
-The backup format logic is ported from `duplicati_verify.py`, which restored real files from the
-backup. The unit tests (`app/src/test`) decrypt AES Crypt v2 and v3 files that were made by a
-separate Python implementation of the spec.
-
-## Status
-
-Milestone 1 (whole-volume downloads) is implemented. Partial downloads with HTTP Range (milestone 2)
-and resuming an interrupted restore are not yet done.
+| `webdav` | Read-only WebDAV client (PROPFIND and GET) |
+| `crypto` | Streaming decryptor for the AES Crypt format (versions 2 and 3) used by Duplicati |
+| `format` | Parsers for Duplicati's remote file names, manifest, file lists (`dlist`) and indexes (`dindex`) |
+| `index` | Local Room database of versions, files, folders and block locations |
+| `sync` | Reads the remote backup into the local index |
+| `restore` | Plans and runs restores, checks every block and file, saves the results |
+| `cache` | Size-limited cache of downloaded (encrypted) volumes |
+| `data` | Settings, the PIN-protected secret store and the diagnostics log |
+| `update` | Self-update from GitHub releases |
+| `ui` | Jetpack Compose screens |

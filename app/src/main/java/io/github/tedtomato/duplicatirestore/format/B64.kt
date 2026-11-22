@@ -5,7 +5,7 @@ import java.util.Base64
 
 /** Base64 helpers. Duplicati uses standard base64 in JSON and may use base64url in zip entry names. */
 object B64 {
-    /** Converts base64url to standard base64 with padding, like b64_plain() in duplicati_verify.py. */
+    /** Converts base64url to standard base64 with padding. */
     fun plain(s: String): String {
         val t = s.trim().replace('-', '+').replace('_', '/')
         val pad = (4 - t.length % 4) % 4

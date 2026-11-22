@@ -31,7 +31,7 @@ data class RestorePlan(
 private class Target(val file: Int, val index: Int)
 
 /**
- * Restores files by downloading whole dblock volumes (milestone 1).
+ * Restores files by downloading whole dblock volumes.
  *
  * Checks, in order: every block's SHA-256 equals its name; every downloaded volume's SHA-256 equals
  * the `volumehash` from the dindex; every rebuilt file's size and SHA-256 equal the dlist entry.

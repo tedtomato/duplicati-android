@@ -34,8 +34,6 @@ class AesHeader(
 /**
  * Streaming decryptor for the AES Crypt file format (versions 2 and 3), which Duplicati uses for
  * its built-in `.aes` encryption. Spec: https://www.aescrypt.com/aes_file_format.html
- *
- * Ported from duplicati_verify.py, which restored real files from the backup.
  */
 object AesCrypt {
     private const val V2_ROUNDS = 8192
