@@ -21,13 +21,13 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android platform 37
+      - name: Install Android platform 37.0
         run: |
           SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | sort -V | tail -1)
           echo "Using $SDKM"
           "$SDKM" --list 2>/dev/null | grep -E "platforms;android-3[6-9]|build-tools;3[6-9]" | sort -u || true
           yes | "$SDKM" --licenses > /dev/null || true
-          "$SDKM" --install "platforms;android-37" "build-tools;36.0.0" > /dev/null
+          "$SDKM" --install "platforms;android-37.0" "build-tools;36.0.0" > /dev/null
 
       - uses: gradle/actions/setup-gradle@v4
 

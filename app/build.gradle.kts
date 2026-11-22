@@ -13,7 +13,10 @@ val appVersionName = "0.1"
 
 android {
     namespace = "io.github.tedtomato.duplicatirestore"
-    compileSdk = 37
+    // The SDK package is "platforms;android-37.0" (a platform with a minor version).
+    compileSdk {
+        version = release(37) { minorApiLevel = 0 }
+    }
 
     defaultConfig {
         applicationId = "io.github.tedtomato.duplicatirestore"

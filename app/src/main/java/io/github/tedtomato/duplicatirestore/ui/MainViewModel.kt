@@ -137,6 +137,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: WrongPinException) {
                 onWrong(e.message!!)
                 if (!app.secretStore.hasSaved) resetTo(Screen.Setup)
+            } catch (e: Exception) {
+                AppLog.e("Unlock failed", e)
+                if (!app.secretStore.hasSaved) resetTo(Screen.Setup)
+                throw e
             }
         }
     }
