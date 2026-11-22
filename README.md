@@ -69,9 +69,11 @@ install a release signed with a new key.
 
 1. Bump `appVersionCode` and `appVersionName` in `app/build.gradle.kts`. Never reuse a version
    that has already been delivered.
-2. Commit, then push a tag `v<versionName>` (e.g. `v0.2`) on that commit.
-3. The workflow builds the signed APK and publishes a GitHub release containing
-   `DuplicatiRestore-<version>.apk` and `update.json`.
+2. Commit and push, then either push a tag `v<versionName>` (e.g. `v0.2`) on that commit, or run
+   the Build workflow by hand (Actions › Build › Run workflow) with "Publish a signed release" ticked.
+3. The workflow builds the signed APK and publishes a GitHub release `v<versionName>` containing
+   `DuplicatiRestore-<version>.apk` and `update.json`. It refuses to publish a version that already
+   has a release.
 
 Install the first release by opening its APK on the phone. After that, the app offers each new
 release by itself (Settings › Updates, or a banner on the versions screen).
