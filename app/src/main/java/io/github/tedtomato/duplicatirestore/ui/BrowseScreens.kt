@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -132,7 +133,7 @@ fun BrowserScreen(vm: MainViewModel) {
             Column {
                 vm.busy?.let { BusyBar(it) }
                 if (vm.selectionCount > 0) Surface(tonalElevation = 3.dp) {
-                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("${vm.selectionCount} files · ${formatBytes(vm.selectionBytes)}", Modifier.weight(1f))
                         Button(onClick = { vm.prepareRestore() }, enabled = vm.busy == null) { Text("Restore") }
                     }
