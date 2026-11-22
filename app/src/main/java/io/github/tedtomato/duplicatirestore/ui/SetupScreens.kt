@@ -96,10 +96,10 @@ fun SetupScreen(vm: MainViewModel) {
         bottomBar = { vm.busy?.let { BusyBar(it) } },
     ) { pad ->
         ScrollColumn(Modifier.padding(pad).imePadding()) {
-            Text("WebDAV (Hetzner Storage Box)", style = MaterialTheme.typography.titleMedium)
+            Text("WebDAV", style = MaterialTheme.typography.titleMedium)
             OutlinedTextField(url, { url = it }, label = { Text("WebDAV folder URL") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
-                supportingText = { Text("e.g. https://uXXXXXX.your-storagebox.de/Backups/MyPC/") },
+                supportingText = { Text("The folder that holds the backup files, e.g. https://example.com/Backups/MyPC/") },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
             OutlinedTextField(user, { user = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             SecretField("WebDAV password", password, { password = it })
@@ -135,7 +135,7 @@ fun SetupScreen(vm: MainViewModel) {
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Good to know", style = MaterialTheme.typography.titleSmall)
-                    Text("• Use a read-only Storage Box sub-account limited to the backup folder. Its host is uXXXXXX-subN.your-storagebox.de and its root is the shared folder, so the URL path is shorter.", style = MaterialTheme.typography.bodySmall)
+                    Text("• Use a read-only WebDAV account limited to the backup folder.", style = MaterialTheme.typography.bodySmall)
                     Text("• This app only reads the backup. It never writes, renames or deletes anything on the storage.", style = MaterialTheme.typography.bodySmall)
                     Text("• Restored files are saved unencrypted on this device.", style = MaterialTheme.typography.bodySmall)
                     Text("• Supported: Duplicati backups with zip compression and AES encryption, over WebDAV.", style = MaterialTheme.typography.bodySmall)

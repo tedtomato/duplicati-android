@@ -8,8 +8,8 @@ plugins {
 }
 
 // Bump for every package that is handed to the user. Never reuse a delivered version.
-val appVersionCode = 1
-val appVersionName = "0.1"
+val appVersionCode = 2
+val appVersionName = "0.2"
 
 android {
     namespace = "io.github.tedtomato.duplicatirestore"
